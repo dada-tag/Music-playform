@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Music Platform Starter</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; background: #0f0f0f; color: #eee; }
+  h1 { font-size: 1.4rem; }
+  form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; padding: 16px; border: 1px solid #333; border-radius: 8px; }
+  input, button { padding: 8px; font-size: 1rem; border-radius: 6px; border: 1px solid #444; background: #1a1a1a; color: #eee; }
+  button { cursor: pointer; background: #7c3aed; border: none; }
+  button:hover { background: #6d28d9; }
+  .track { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #222; }
+  .track button { padding: 6px 12px; }
+  #player { position: sticky; bottom: 0; background: #1a1a1a; padding: 12px; border-radius: 8px; margin-top: 20px; }
+  audio { width: 100%; }
+</style>
+</head>
+<body>
+  <h1>🎵 Music Platform — Starter</h1>
+
+  <form id="uploadForm">
+    <input type="text" id="title" placeholder="Track title" required>
+    <input type="text" id="artist" placeholder="Artist name" required>
+    <input type="file" id="audio" accept="audio/*" required>
+    <button type="submit">Upload track</button>
+  </form>
+
+  <div id="trackList"></div>
+
+  <div id="player">
+    <div id="nowPlaying">Nothing playing</div>
+    <audio id="audioPlayer" controls></audio>
+  </div>
+
+<script>
+const trackList = document.getElementById('trackList');
+const audioPlayer = document.getElementById('audioPlayer');
+const nowPlaying = document.getElementById('nowPlaying');
+
+async function loadTracks() {
+  const res = await fetch('/api/tracks');
+  const tracks = await res.json();
+  trackList.innerHTML = tracks.map(t => `
+    <div class="track">
+      <span>${t.title} — ${t.artist} ${t.duration_seconds ? `(${Math.round(t.duration_seconds)}s)` : ''}</span>
+      <button onclick="play(${t.id}, '${t.title.replace(/'/g, "\\'")}', '${t.artist.replace(/'/g, "\\'")}')">Play</button>
+    </div>
+  `).join('') || '<p>No tracks yet — upload one above.</p>';
+}
+
+function play(id, title, artist) {
+  audioPlayer.src = `/api/stream/${id}`;
+  audioPlayer.play();
+  nowPlaying.textContent = `Now playing: ${title} — ${artist}`;
+}
+
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData();
+  formData.append('title', document.getElementById('title').value);
+  formData.append('artist', document.getElementById('artist').value);
+  formData.append('audio', document.getElementById('audio').files[0]);
+
+  const res = await fetch('/api/tracks', { method: 'POST', body: formData });
+  if (res.ok) {
+    e.target.reset();
+    loadTracks();
+  } else {
+    const err = await res.json();
+    alert('Upload failed: ' + err.error);
+  }
+});
+
+loadTracks();
+</script>
+</body>
+</html>

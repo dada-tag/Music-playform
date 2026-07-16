@@ -1,0 +1,16 @@
+{
+  "name": "music-platform-starter",
+  "version": "1.0.0",
+  "description": "Minimal starter backend for a music streaming platform: upload, catalog, and stream audio.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "music-metadata": "^7.14.0"
+  }
+}
