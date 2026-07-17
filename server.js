@@ -4,19 +4,19 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 const { parseFile } = require('music-metadata');
+const { hashPassword, verifyPassword, signToken, requireAuth } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const UPLOAD_DIR = process.env.STORAGE_DIR ? path.join(process.env.STORAGE_DIR, 'uploads') : path.join(__dirname, 'uploads');
+const UPLOAD_DIR = process.env.STORAGE_DIR
+  ? path.join(process.env.STORAGE_DIR, 'uploads')
+  : path.join(__dirname, 'uploads');
 
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ---- Upload handling ----
-// This is Phase 1: raw files served as-is. In Phase 2 you'd swap this
-// step for an FFmpeg transcode into HLS segments (see server-hls-note.md).
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
@@ -30,25 +30,66 @@ const upload = multer({
     const ok = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/flac', 'audio/mp4', 'audio/aac'];
     cb(null, ok.includes(file.mimetype) || file.originalname.match(/\.(mp3|wav|flac|m4a|aac)$/i));
   },
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB cap for the starter
+  limits: { fileSize: 100 * 1024 * 1024 }
 });
 
-// POST /api/tracks — upload a track with title + artist name
-app.post('/api/tracks', upload.single('audio'), async (req, res) => {
+app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { title, artist } = req.body;
-    if (!req.file || !title || !artist) {
-      return res.status(400).json({ error: 'title, artist, and audio file are required' });
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'name, email, and password are required' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
-    // Get or create artist
-    let artistRow = db.prepare('SELECT * FROM artists WHERE name = ?').get(artist);
-    if (!artistRow) {
-      const info = db.prepare('INSERT INTO artists (name) VALUES (?)').run(artist);
-      artistRow = { id: info.lastInsertRowid, name: artist };
+    const existing = db.prepare('SELECT id FROM artists WHERE email = ?').get(email);
+    if (existing) {
+      return res.status(409).json({ error: 'An account with that email already exists' });
     }
 
-    // Pull duration from the audio file itself
+    const password_hash = hashPassword(password);
+    const info = db.prepare(
+      'INSERT INTO artists (name, email, password_hash) VALUES (?, ?, ?)'
+    ).run(name, email, password_hash);
+
+    const artist = { id: info.lastInsertRowid, name, email };
+    const token = signToken(artist);
+    res.status(201).json({ token, artist });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Signup failed' });
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email and password are required' });
+    }
+
+    const row = db.prepare('SELECT * FROM artists WHERE email = ?').get(email);
+    if (!row || !row.password_hash || !verifyPassword(password, row.password_hash)) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const artist = { id: row.id, name: row.name, email: row.email };
+    const token = signToken(artist);
+    res.json({ token, artist });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/tracks', requireAuth, upload.single('audio'), async (req, res) => {
+  try {
+    const { title } = req.body;
+    if (!req.file || !title) {
+      return res.status(400).json({ error: 'title and audio file are required' });
+    }
+
     let duration = null;
     try {
       const meta = await parseFile(req.file.path);
@@ -59,12 +100,12 @@ app.post('/api/tracks', upload.single('audio'), async (req, res) => {
 
     const info = db.prepare(
       'INSERT INTO tracks (title, artist_id, filename, duration_seconds) VALUES (?, ?, ?, ?)'
-    ).run(title, artistRow.id, req.file.filename, duration);
+    ).run(title, req.artist.id, req.file.filename, duration);
 
     res.status(201).json({
       id: info.lastInsertRowid,
       title,
-      artist,
+      artist: req.artist.name,
       duration_seconds: duration,
       stream_url: `/api/stream/${info.lastInsertRowid}`
     });
@@ -74,7 +115,6 @@ app.post('/api/tracks', upload.single('audio'), async (req, res) => {
   }
 });
 
-// GET /api/tracks — list catalog
 app.get('/api/tracks', (req, res) => {
   const rows = db.prepare(`
     SELECT tracks.id, tracks.title, artists.name AS artist, tracks.duration_seconds
@@ -84,9 +124,6 @@ app.get('/api/tracks', (req, res) => {
   res.json(rows);
 });
 
-// GET /api/stream/:id — stream audio with HTTP range support
-// Range support is what lets the browser seek and lets mobile players
-// buffer efficiently — required for any real playback experience.
 app.get('/api/stream/:id', (req, res) => {
   const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(req.params.id);
   if (!track) return res.status(404).json({ error: 'Track not found' });

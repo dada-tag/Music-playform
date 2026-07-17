@@ -14,16 +14,43 @@
   .track button { padding: 6px 12px; }
   #player { position: sticky; bottom: 0; background: #1a1a1a; padding: 12px; border-radius: 8px; margin-top: 20px; }
   audio { width: 100%; }
+  #authBar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 0.9rem; }
+  #authBar button { width: auto; padding: 6px 12px; }
+  .authToggle { background: none; border: none; color: #a78bfa; cursor: pointer; text-decoration: underline; padding: 0; font-size: 0.85rem; }
+  .error { color: #f87171; font-size: 0.85rem; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
   <h1>🎵 Music Platform — Starter</h1>
 
-  <form id="uploadForm">
+  <div id="authBar"></div>
+
+  <form id="signupForm">
+    <strong>Create an artist account</strong>
+    <input type="text" id="suName" placeholder="Artist / display name" required>
+    <input type="email" id="suEmail" placeholder="Email" required>
+    <input type="password" id="suPassword" placeholder="Password (min 8 characters)" required minlength="8">
+    <button type="submit">Sign up</button>
+    <div id="signupError" class="error"></div>
+    <button type="button" class="authToggle" onclick="showLogin()">Already have an account? Log in</button>
+  </form>
+
+  <form id="loginForm" class="hidden">
+    <strong>Log in</strong>
+    <input type="email" id="liEmail" placeholder="Email" required>
+    <input type="password" id="liPassword" placeholder="Password" required>
+    <button type="submit">Log in</button>
+    <div id="loginError" class="error"></div>
+    <button type="button" class="authToggle" onclick="showSignup()">Need an account? Sign up</button>
+  </form>
+
+  <form id="uploadForm" class="hidden">
+    <strong>Upload a track</strong>
     <input type="text" id="title" placeholder="Track title" required>
-    <input type="text" id="artist" placeholder="Artist name" required>
     <input type="file" id="audio" accept="audio/*" required>
     <button type="submit">Upload track</button>
+    <div id="uploadError" class="error"></div>
   </form>
 
   <div id="trackList"></div>
@@ -37,6 +64,102 @@
 const trackList = document.getElementById('trackList');
 const audioPlayer = document.getElementById('audioPlayer');
 const nowPlaying = document.getElementById('nowPlaying');
+
+function getSession() {
+  try {
+    return JSON.parse(localStorage.getItem('session'));
+  } catch {
+    return null;
+  }
+}
+function setSession(session) {
+  localStorage.setItem('session', JSON.stringify(session));
+  renderAuthUI();
+}
+function clearSession() {
+  localStorage.removeItem('session');
+  renderAuthUI();
+}
+
+function showLogin() {
+  document.getElementById('signupForm').classList.add('hidden');
+  document.getElementById('loginForm').classList.remove('hidden');
+}
+function showSignup() {
+  document.getElementById('loginForm').classList.add('hidden');
+  document.getElementById('signupForm').classList.remove('hidden');
+}
+
+function renderAuthUI() {
+  const session = getSession();
+  const authBar = document.getElementById('authBar');
+  const signupForm = document.getElementById('signupForm');
+  const loginForm = document.getElementById('loginForm');
+  const uploadForm = document.getElementById('uploadForm');
+
+  if (session && session.token) {
+    authBar.innerHTML = `<span>Logged in as <strong>${session.artist.name}</strong></span>`;
+    const logoutBtn = document.createElement('button');
+    logoutBtn.textContent = 'Log out';
+    logoutBtn.onclick = clearSession;
+    authBar.appendChild(logoutBtn);
+
+    signupForm.classList.add('hidden');
+    loginForm.classList.add('hidden');
+    uploadForm.classList.remove('hidden');
+  } else {
+    authBar.innerHTML = '';
+    uploadForm.classList.add('hidden');
+    if (signupForm.classList.contains('hidden') && loginForm.classList.contains('hidden')) {
+      signupForm.classList.remove('hidden');
+    }
+  }
+}
+
+document.getElementById('signupForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('signupError');
+  errorEl.textContent = '';
+  const body = {
+    name: document.getElementById('suName').value,
+    email: document.getElementById('suEmail').value,
+    password: document.getElementById('suPassword').value
+  };
+  const res = await fetch('/api/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (res.ok) {
+    setSession(data);
+    e.target.reset();
+  } else {
+    errorEl.textContent = data.error || 'Signup failed';
+  }
+});
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = document.getElementById('loginError');
+  errorEl.textContent = '';
+  const body = {
+    email: document.getElementById('liEmail').value,
+    password: document.getElementById('liPassword').value
+  };
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (res.ok) {
+    setSession(data);
+    e.target.reset();
+  } else {
+    errorEl.textContent = data.error || 'Login failed';
+  }
+});
 
 async function loadTracks() {
   const res = await fetch('/api/tracks');
@@ -57,21 +180,35 @@ function play(id, title, artist) {
 
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const errorEl = document.getElementById('uploadError');
+  errorEl.textContent = '';
+  const session = getSession();
+  if (!session) return;
+
   const formData = new FormData();
   formData.append('title', document.getElementById('title').value);
-  formData.append('artist', document.getElementById('artist').value);
   formData.append('audio', document.getElementById('audio').files[0]);
 
-  const res = await fetch('/api/tracks', { method: 'POST', body: formData });
+  const res = await fetch('/api/tracks', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${session.token}` },
+    body: formData
+  });
   if (res.ok) {
     e.target.reset();
     loadTracks();
   } else {
     const err = await res.json();
-    alert('Upload failed: ' + err.error);
+    if (res.status === 401) {
+      errorEl.textContent = 'Your session expired — please log in again.';
+      clearSession();
+    } else {
+      errorEl.textContent = err.error || 'Upload failed';
+    }
   }
 });
 
+renderAuthUI();
 loadTracks();
 </script>
 </body>
