@@ -7,7 +7,7 @@ const { parseFile } = require('music-metadata');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const UPLOAD_DIR = process.env.STORAGE_DIR ? path.join(process.env.STORAGE_DIR, 'uploads') : path.join(__dirname, 'uploads');
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
 

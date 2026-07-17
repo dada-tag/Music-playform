@@ -1,7 +1,11 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
+const fs = require('fs');
 
-const db = new DatabaseSync(path.join(__dirname, 'catalog.db'));
+const DB_DIR = process.env.STORAGE_DIR || __dirname;
+if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+
+const db = new DatabaseSync(path.join(DB_DIR, 'catalog.db'));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS artists (
