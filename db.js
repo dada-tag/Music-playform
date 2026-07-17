@@ -37,4 +37,25 @@ ensureColumn('artists', 'email', 'TEXT');
 ensureColumn('artists', 'password_hash', 'TEXT');
 ensureColumn('artists', 'created_at', 'TEXT');
 
+const tableDef = db.prepare(
+  "SELECT sql FROM sqlite_master WHERE type='table' AND name='artists'"
+).get();
+if (tableDef && /name\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(tableDef.sql)) {
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec(`
+    ALTER TABLE artists RENAME TO artists_old;
+    CREATE TABLE artists (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE,
+      password_hash TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO artists (id, name, email, password_hash, created_at)
+      SELECT id, name, email, password_hash, created_at FROM artists_old;
+    DROP TABLE artists_old;
+  `);
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+
 module.exports = db;
